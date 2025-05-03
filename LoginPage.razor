@@ -1,0 +1,117 @@
+﻿@page "/login"
+
+@using Kairos.Shared.Data
+@using Microsoft.FluentUI.AspNetCore.Components
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using System.Text.Json
+
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager NavigationManager
+
+<div class="login-container">
+	<div class="icon-container">
+		<img src="/Images/airplane1.png" alt="Airline Icon" class="airline-icon" />
+	</div>
+	<div class="login-form">
+		<EditForm Model="Data" OnValidSubmit="Authenticate" FormName="LoginForm">
+			<DataAnnotationsValidator />
+			<div class="form-group">
+				<label>Username</label>
+				<InputText id="Name" @bind-Value="Data.UserName" class="form-control" placeholder="Enter your Username" />
+				<ValidationMessage For="@(() => Data.UserName)" />
+			</div>
+			<div class="form-group">
+				<label>Password</label>
+				<InputText id="Password" @bind-Value="Data.Password" type="password" class="form-control" placeholder="Enter your Password" />
+				<ValidationMessage For="@(() => Data.Password)" />
+			</div>
+			<div class="form-group">
+				<button type="submit" class="btn btn-primary">Login</button>
+			</div>
+		</EditForm>
+		@if (!string.IsNullOrEmpty(errorMessage))
+		{
+			<div class="alert alert-danger" role="alert">
+				@errorMessage
+			</div>
+		}
+	</div>
+</div>
+
+
+@code {
+	[CascadingParameter]
+	public HttpContext? HttpContext { get; set; }
+
+	[SupplyParameterFromForm]
+	public LoginViewModel Data { get; set; } = new();
+
+	[Parameter]
+	[SupplyParameterFromQuery]
+	public string? ReturnURL { get; set; }
+
+	private string? errorMessage;
+
+	private async Task Authenticate()
+	{
+		var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+		var response = await httpClient.PostAsJsonAsync("/login", new UserEntity
+			{
+				Name = Data.UserName,
+				Password = Data.Password
+			});
+		if (response.IsSuccessStatusCode)
+		{
+			var content = await response.Content.ReadAsStringAsync();
+			try
+			{
+				var loginResponse = await response.Content.ReadFromJsonAsync<LoginResponse>();
+
+				if (loginResponse.Code == 0)
+				{
+					var claims = new List<Claim>
+					{
+						new Claim(ClaimTypes.Name, loginResponse.UserName),
+						new Claim(ClaimTypes.NameIdentifier, loginResponse.UserId.ToString()),
+					};
+
+					foreach (var role in loginResponse.Roles)
+					{
+						claims.Add(new Claim(ClaimTypes.Role, role));
+					}
+
+					var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+					var principal = new ClaimsPrincipal(identity);
+					await HttpContext.SignInAsync(principal);
+
+					if (!string.IsNullOrEmpty(ReturnURL)
+						&& !ReturnURL.StartsWith("/login")
+						&& !ReturnURL.Contains("logout", StringComparison.InvariantCultureIgnoreCase))
+					{
+						NavigationManager.NavigateTo(ReturnURL, true);
+					}
+					else
+					{
+						NavigationManager.NavigateTo("/", true);
+					}
+				}
+				else
+				{
+					errorMessage = "Login failed. Please try again.";
+				}
+			}
+			catch (Exception ex)
+			{
+				NavigationManager.NavigateTo("/", true);
+			}
+		}
+		else
+		{
+			errorMessage = "Login failed. Please try again.";
+		}
+	}
+
+
+}

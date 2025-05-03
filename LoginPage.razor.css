@@ -1,0 +1,60 @@
+﻿.login-container {
+    background-image: url('/Images/Frame1.png');
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center left; 
+    height: 80vh;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 300px; 
+}
+
+.login-form {
+    background-color: rgba(255, 255, 255, 0.8); 
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    width: 300px;
+    text-align: center;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.btn-primary {
+    background-color: #5375B6;
+    color: white;
+    border: none;
+    border-radius: 20px; 
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+    .btn-primary:hover {
+        background-color: #3355aa;
+    }
+
+.icon-container {
+    position: absolute; 
+    top: 46%; 
+    left: 31%; 
+    transform: translate(-100%, -100%);
+    width: 70px; 
+    height: 70px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.airline-icon {
+    width: 80%; 
+    height: 80%; 
+    object-fit: contain; 
+    background: none;
+    border: none;
+}
+

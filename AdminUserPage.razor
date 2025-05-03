@@ -1,0 +1,194 @@
+﻿@page "/user"
+@attribute [Authorize(Roles = "Admin")]
+
+<h3>AdminUserPage</h3>
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.AspNetCore.Authorization
+@using Kairos.Shared.Data
+@inject IHttpClientFactory HttpClientFactory
+
+
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+@inject NavigationManager NavManager
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>Username</th>
+            <th>Password</th>
+            <th>Roles</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var user in Users)
+        {
+            <tr>
+                <td>
+                    <input class="form-control form-control-sm" placeholder="Username"
+                           @bind="user.Name" disabled="@(!user.IsEditing)" />
+                </td>
+                <td>
+                    <input class="form-control form-control-sm" placeholder="Password"
+                           @bind="user.Password" type="password" disabled="@(!user.IsEditing)" />
+                </td>
+                <td>
+                    <select class="form-control form-control-sm" @bind="user.RolesAsString" disabled="@(!user.IsEditing)">
+                        <option value="User">User</option>
+                        <option value="Admin">Admin</option>
+                    </select>
+                </td>
+                <td>
+                    @if (user.IsEditing)
+                    {
+                        <FluentButton IconEnd="@(new Icons.Regular.Size16.Save())"
+                                      @onclick="() => SaveUser(user)" />
+                        <FluentButton IconEnd="@(new Icons.Regular.Size16.ClosedCaption())"
+                                      @onclick="() => CancelEdit(user)" />
+                    }
+                    else
+                    {
+                        <FluentButton IconEnd="@(new Icons.Regular.Size16.Edit())"
+                                      @onclick="() => EditUser(user)" />
+                        <FluentButton IconEnd="@(new Icons.Regular.Size16.Delete())"
+                                      @onclick="() => ConfirmDelete(user)" />
+                    }
+                </td>
+            </tr>
+        }
+        <tr>
+            <td>
+                <input class="form-control form-control-sm" placeholder="Username" @bind="NewUser.Name" />
+            </td>
+            <td>
+                <input class="form-control form-control-sm" placeholder="Password" type="password" @bind="NewUser.Password" />
+            </td>
+            <td>
+                <select class="form-control form-control-sm" @bind="NewUser.RolesAsString">
+                    <option value="User">User</option>
+                    <option value="Admin">Admin</option>
+                </select>
+            </td>
+            <td>
+                <FluentButton IconEnd="@(new Icons.Regular.Size16.Add())"
+                              @onclick="AddUser" />
+            </td>
+        </tr>
+    </tbody>
+</table>
+
+ @if (ShowDeleteConfirmation)
+{
+    <div class="modal fade show d-block" tabindex="-1" role="dialog" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Deletion</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CancelDelete"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete the user <b>@SelectedUser.Name</b>?</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CancelDelete">No</button>
+                    <button type="button" class="btn btn-primary" @onclick="ConfirmAndDelete">Yes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<UserEntity> Users = new();
+    private UserEntity NewUser = new UserEntity();
+    private UserEntity SelectedUser;
+    private bool ShowDeleteConfirmation;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUsersAsync();
+    }
+
+    private async Task LoadUsersAsync()
+    {
+        var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+        var response = await httpClient.GetAsync("/users");
+        if (response.IsSuccessStatusCode)
+        {
+            Users = await response.Content.ReadFromJsonAsync<List<UserEntity>>();
+        }
+    }
+
+    private async Task AddUser()
+    {
+        var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+        var response = await httpClient.PostAsJsonAsync("/users/add", NewUser); 
+        if (response.IsSuccessStatusCode)
+        {
+            NewUser = new UserEntity();
+            await LoadUsersAsync();
+        }
+    }
+
+    private void EditUser(UserEntity user)
+    {
+        user.IsEditing = true;
+    }
+
+    private async Task SaveUser(UserEntity user)
+    {
+        user.IsEditing = false; 
+        await UpdateUser(user); 
+    }
+
+    private async Task CancelEdit(UserEntity user)
+    {
+        user.IsEditing = false; 
+        await LoadUsersAsync(); 
+    }
+
+    private async Task UpdateUser(UserEntity user)
+    {
+        var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+        var response = await httpClient.PutAsJsonAsync("/users/update", user); 
+        if (response.IsSuccessStatusCode)
+        {
+            await LoadUsersAsync();
+        }
+    }
+
+    private async Task DeleteUser(string username)
+    {
+        var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+        var response = await httpClient.DeleteAsync($"/users/delete/{username}");
+        if (response.IsSuccessStatusCode)
+        {
+            Users.RemoveAll(u => u.Name == username);
+        }
+    }
+
+    private void ConfirmDelete(UserEntity user)
+    {
+        SelectedUser = user;
+        ShowDeleteConfirmation = true;
+    }
+
+    private void CancelDelete()
+    {
+        SelectedUser = null;
+        ShowDeleteConfirmation = false;
+    }
+
+
+    private async Task ConfirmAndDelete()
+    {
+        if (SelectedUser != null)
+        {
+            await DeleteUser(SelectedUser.Name); 
+            SelectedUser = null; 
+            ShowDeleteConfirmation = false; 
+        }
+    }
+
+}

@@ -1,0 +1,522 @@
+﻿@page "/admin"
+
+@using System.Collections.Generic
+@using Microsoft.FluentUI.AspNetCore.Components
+@using NLog;
+@using Kairos.Shared.Data
+
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+@inject IHttpClientFactory HttpClientFactory
+
+
+<h3>Admin Panel</h3>
+<FluentTabs>
+	<FluentTab Id="tab-1">
+		<Header>
+			<FluentIcon Value="@(new Icons.Regular.Size16.PeopleProhibited())" />
+			Profession
+		</Header>
+		<Content>
+			<div class="form-container">
+				<table class="table">
+					<thead>
+						<tr>
+							<th>Profession Name</th>
+							<th>Action</th>
+						</tr>
+					</thead>
+					<tbody>
+						@foreach (var profession in professions)
+						{
+							<tr>
+								<td>
+									@if (editingProfession?.Id == profession.Id)
+									{
+										<input type="text" @bind="editingProfession.Name" />
+									}
+									else
+									{
+										@profession.Name
+									}
+								</td>
+								<AuthorizeView Roles="Admin">
+									<Authorized>
+										<td>
+											@if (editingProfession?.Id == profession.Id)
+											{
+												<button class="save-button" @onclick="SaveEditedProfession">Save</button>
+												<button class="cancel-button" @onclick="CancelEditProfession">Cancel</button>
+											}
+											else
+											{
+												<button class="edit-button" @onclick="() => EditProfession(profession)">Edit</button>
+												<button class="delete-button" @onclick="() => ConfirmDelete(profession)">Delete</button>
+											}
+										</td>
+									</Authorized>
+								</AuthorizeView>
+							</tr>
+						}
+						<tr>
+							<td>
+								<input type="text" placeholder="New Profession" @bind="newProfession.Name" />
+							</td>
+							<AuthorizeView Roles="Admin">
+								<Authorized>
+									<td>
+										<button type="button" class="add-button" @onclick="AddProfession">Add</button>
+									</td>
+								</Authorized>
+							</AuthorizeView>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+		</Content>
+	</FluentTab>
+	<FluentTab Id="tab-2">
+		<Header>
+			<FluentIcon Value="@(new Icons.Regular.Size16.Document())" Color="@Color.Success" />
+			Certificate
+		</Header>
+		<Content>
+			<div class="form-container">
+				<table class="table">
+					<thead>
+						<tr>
+							<th>Certificate Name</th>
+							<th>Airline</th>
+							<th>Action</th>
+						</tr>
+					</thead>
+					<tbody>
+						@foreach (var certificate in certificates)
+						{
+							<tr>
+								<td>
+									@if (editingCertificate?.Id == certificate.Id)
+									{
+										<input type="text" @bind="editingCertificate.Name" />
+									}
+									else
+									{
+										@certificate.Name
+									}
+								</td>
+								<td>
+									@if (editingCertificate?.Id == certificate.Id)
+									{
+										@* <input type="text" @bind="editingCertificate.Airline" /> *@
+										@* <FluentCombobox Placeholder="Select flight..."
+														Autocomplete="ComboboxAutocomplete.List"
+														TOption="string"
+														Items="FlightStrings"
+														Height="200px"
+														@bind-Value="editingCertificate.Airline"
+														SelectedOptionChanged="@(e => OnAirlineChanged(e))">
+											<ValidationMessage For="@(() => editingCertificate.Airline)" />
+										</FluentCombobox> *@
+
+										<FluentAutocomplete TOption="string"
+															AutoComplete="list"
+															Autofocus="true"
+															Width="500px"
+															Placeholder="Select Airlines"
+															MaximumOptionsSearch="70"
+															OptionText="@(item => item)"
+															Multiple=true
+															Items="FlightStrings"
+															@bind-SelectedOptions="@SelectedEditingAirlinesSetter" />
+
+
+
+									}
+									else
+									{
+										@certificate.Airline
+									}
+								</td>
+								<AuthorizeView Roles="Admin">
+									<Authorized>
+										<td>
+											@if (editingCertificate?.Id == certificate.Id)
+											{
+												<button class="save-button" @onclick="SaveEditedCertificate">Save</button>
+												<button class="cancel-button" @onclick="CancelEditCertificate">Cancel</button>
+											}
+											else
+											{
+												<button class="edit-button" @onclick="() => EditCertificate(certificate)">Edit</button>
+												<button class="delete-button" @onclick="() => ConfirmDeleteCertificate(certificate)">Delete</button>
+											}
+										</td>
+									</Authorized>
+								</AuthorizeView>
+							</tr>
+						}
+						<tr>
+							<td>
+								<input type="text" placeholder="Certificate Name" @bind="newCertificate.Name" />
+							</td>
+							<td>
+								@* <FluentCombobox Placeholder="Select flight..."
+												Autocomplete="ComboboxAutocomplete.List"
+												TOption="string"
+												Items="FlightStrings"
+												Height="200px"
+												Style="width: 250px;"
+												@bind-Value="newCertificate.Airline"
+												SelectedOptionChanged="@(e => OnAirlineChanged(e))">
+									<ValidationMessage For="@(() => newCertificate.Airline)" />
+								</FluentCombobox> *@
+								<FluentAutocomplete TOption="string"
+													AutoComplete="list"
+													Autofocus="true"
+													Width="500px"
+													Placeholder="Select Airlines"
+													MaximumOptionsSearch="70"
+													OptionText="@(item => item)"
+													Multiple=true
+													Items="FlightStrings"
+													@bind-SelectedOptions="@SelectedAirlinesSetter" />
+
+
+							</td>
+							<AuthorizeView Roles="Admin">
+								<Authorized>
+									<td>
+										<button class="add-button" @onclick="AddCertificate">Add</button>
+									</td>
+								</Authorized>
+							</AuthorizeView>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+		</Content>
+	</FluentTab>
+</FluentTabs>
+
+@if (ShowDeleteConfirmation)
+{
+	<div class="modal fade show d-block" tabindex="-1" role="dialog" style="background-color: rgba(0,0,0,0.5);">
+		<div class="modal-dialog" role="document">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title">Confirm Deletion</h5>
+					<button type="button" class="close" aria-label="Close" @onclick="CancelDelete">
+						<span aria-hidden="true">&times;</span>
+					</button>
+				</div>
+				<div class="modal-body">
+					<p>Are you sure you want to delete this profession?</p>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" @onclick="CancelDelete">No</button>
+					<button type="button" class="btn btn-danger" @onclick="() => DeleteProfession(SelectedProfession)">Yes</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+@if (ShowDeleteCertificateConfirmation)
+{
+	<div class="modal fade show d-block" tabindex="-1" role="dialog" style="background-color: rgba(0,0,0,0.5);">
+		<div class="modal-dialog" role="document">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title">Confirm Deletion</h5>
+					<button type="button" class="close" aria-label="Close" @onclick="CancelDeleteCertificate">
+						<span aria-hidden="true">&times;</span>
+					</button>
+				</div>
+				<div class="modal-body">
+					<p>Are you sure you want to delete this certificate?</p>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" @onclick="CancelDeleteCertificate">No</button>
+					<button type="button" class="btn btn-danger" @onclick="() => DeleteCertificate(SelectedCertificate)">Yes</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+
+@code {
+	private List<Profession> professions = new();
+	private Profession? newProfession = new Profession();
+	private Profession? editingProfession = null;
+	private Profession SelectedProfession;
+	private bool ShowDeleteConfirmation;
+
+	protected override async Task OnInitializedAsync()
+	{
+		await LoadProfessions();
+		await LoadCertificates();
+		await LoadFlightsAsync();
+	}
+
+	private async Task LoadProfessions()
+	{
+		var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+		var response = await httpClient.GetAsync("/professions");
+		if (response.IsSuccessStatusCode)
+		{
+			professions = await response.Content.ReadFromJsonAsync<List<Profession>>();
+		}
+	}
+
+	private async Task AddProfession()
+	{
+		if (string.IsNullOrWhiteSpace(newProfession?.Name))
+		{
+			return;
+		}
+		var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+		var response = await httpClient.PostAsJsonAsync("/professions/add", newProfession);
+		if (response.IsSuccessStatusCode)
+		{
+			newProfession = new Profession();
+		}
+		await LoadProfessions();
+
+	}
+
+
+	private void EditProfession(Profession profession)
+	{
+		editingProfession = new Profession
+			{
+				Id = profession.Id,
+				Name = profession.Name
+			};
+	}
+
+
+	private async Task SaveEditedProfession()
+	{
+		if (editingProfession != null)
+		{
+			var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+			var response = await httpClient.PutAsJsonAsync("/professions/update", editingProfession);
+			if (response.IsSuccessStatusCode)
+			{
+				editingProfession = null;
+			}
+			await LoadProfessions();
+		}
+	}
+
+
+	private void CancelEditProfession()
+	{
+		editingProfession = null;
+	}
+
+
+	private void ConfirmDelete(Profession profession)
+	{
+		SelectedProfession = profession;
+		ShowDeleteConfirmation = true;
+	}
+
+	private async Task DeleteProfession(Profession profession)
+	{
+		var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+		var response = await httpClient.DeleteAsync($"/professions/delete/{profession.Id}");
+
+		if (response.IsSuccessStatusCode)
+		{
+			professions.Remove(profession);
+			ShowDeleteConfirmation = false;
+			SelectedProfession = null;
+		}
+		await LoadProfessions();
+	}
+
+	private void CancelDelete()
+	{
+		ShowDeleteConfirmation = false;
+		SelectedProfession = null;
+	}
+
+
+	//------------------------------
+
+	private List<Certificate> certificates = new();
+	private Certificate? newCertificate = new Certificate();
+	private Certificate? editingCertificate = null;
+	private Certificate SelectedCertificate;
+	private bool ShowDeleteCertificateConfirmation;
+
+
+	private async Task LoadCertificates()
+	{
+		var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+		var response = await httpClient.GetAsync("/certificates");
+		if (response.IsSuccessStatusCode)
+		{
+			certificates = await response.Content.ReadFromJsonAsync<List<Certificate>>();
+		}
+	}
+
+	private async Task AddCertificate()
+	{
+		if (string.IsNullOrWhiteSpace(newCertificate?.Name) || string.IsNullOrWhiteSpace(newCertificate?.Airline))
+		{
+			return;
+		}
+
+		var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+		var response = await httpClient.PostAsJsonAsync("/certificates/add", newCertificate);
+		if (response.IsSuccessStatusCode)
+		{
+			newCertificate = new Certificate();
+			await LoadCertificates();
+		}
+	;
+	}
+
+	private void EditCertificate(Certificate certificate)
+	{
+		editingCertificate = new Certificate
+			{
+				Id = certificate.Id,
+				Name = certificate.Name,
+				Airline = certificate.Airline
+			};
+
+		SelectedAirlines = certificate.Airline?.Split(", ") ?? Array.Empty<string>();
+	}
+
+
+	private async Task SaveEditedCertificate()
+	{
+		if (editingCertificate != null)
+		{
+
+			editingCertificate.Airline = string.Join(", ", SelectedAirlines);
+			var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+			var response = await httpClient.PutAsJsonAsync("/certificates/update", editingCertificate);
+			if (response.IsSuccessStatusCode)
+			{
+				editingCertificate = null;
+			}
+
+			await LoadCertificates();
+		}
+	}
+
+	private void CancelEditCertificate()
+	{
+		editingCertificate = null;
+	}
+
+
+	private void ConfirmDeleteCertificate(Certificate certificate)
+	{
+		SelectedCertificate = certificate;
+		ShowDeleteCertificateConfirmation = true;
+	}
+
+	private async Task DeleteCertificate(Certificate certificate)
+	{
+		var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+		var response = await httpClient.DeleteAsync($"/certificates/delete/{certificate.Id}");
+
+		if (response.IsSuccessStatusCode)
+		{
+			certificates.Remove(certificate);
+			ShowDeleteCertificateConfirmation = false;
+			SelectedCertificate = null;
+		}
+		else
+		{
+			var errorMessage = await response.Content.ReadAsStringAsync();
+			Console.WriteLine($"Error deleting certificate: {errorMessage}");
+		}
+		await LoadCertificates();
+	}
+	private void OnSelectedAirlinesChanged(IEnumerable<string> airlines, bool isEditing)
+	{
+		var selectedAirlinesList = airlines.ToList();
+
+		if (isEditing)
+		{
+			SelectedEditingAirlines = selectedAirlinesList;
+			if (editingCertificate != null)
+			{
+				editingCertificate.Airline = string.Join(", ", SelectedEditingAirlines);
+			}
+		}
+		else
+		{
+			SelectedAirlines = selectedAirlinesList;
+			newCertificate.Airline = string.Join(", ", SelectedAirlines);
+		}
+	}
+
+	private void CancelDeleteCertificate()
+	{
+		ShowDeleteCertificateConfirmation = false;
+		SelectedCertificate = null;
+	}
+
+	private List<string> FlightStrings { get; set; } = [];
+	private List<Item> Flights { get; set; } = [];
+	private IEnumerable<string> SelectedAirlines = Array.Empty<string>();
+	private IEnumerable<string> SelectedEditingAirlines = Array.Empty<string>();
+	private IEnumerable<string> SelectedEditingAirlinesSetter
+	{
+		get => SelectedEditingAirlines;
+		set
+		{
+			SelectedEditingAirlines = value.ToList();
+			if (editingCertificate != null)
+			{
+				editingCertificate.Airline = string.Join(", ", SelectedEditingAirlines);
+			}
+		}
+	}
+	private IEnumerable<string> SelectedAirlinesSetter
+	{
+		get => SelectedAirlines;
+		set
+		{
+			SelectedAirlines = value.ToList();
+			newCertificate.Airline = string.Join(", ", SelectedAirlines);
+		}
+	}
+
+
+	private async Task LoadFlightsAsync()
+	{
+		var client = HttpClientFactory.CreateClient(Consts.HttpClientFlightName);
+		var response = await client.GetFromJsonAsync<RootObject>("/api/Flights/GetTimeFixedFlights?maxresultcount=2000&isarrival=true");
+
+		if (response != null)
+		{
+			var armeniaTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Yerevan");
+			Flights = response.Result.Items;
+			FlightStrings = Flights
+				.Where(f => !string.IsNullOrWhiteSpace(f.FlightNumber))
+				.Select(f => $"{f.FlightNumber}")
+				.ToList();
+
+			StateHasChanged();
+		}
+	}
+
+	private void OnAirlineChanged(object? selectedOption)
+	{
+		if (selectedOption is string selectedFlight && !string.IsNullOrWhiteSpace(selectedFlight))
+		{
+			var flight = Flights
+				.FirstOrDefault(f => $"{f.FlightNumber} {f.ProgrammedTime:MM, dd} {f.ProgrammedTime:HH:mm} {f.AirportData.City.Name} ({f.AirportData.IataCode})" == selectedFlight);
+		}
+	}
+
+}

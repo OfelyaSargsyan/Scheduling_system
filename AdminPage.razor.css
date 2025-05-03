@@ -1,0 +1,66 @@
+﻿.tab-container {
+    display: flex;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #ccc;
+}
+
+.tab-button {
+    padding: 10px 20px;
+    border: none;
+    background: none;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+    .tab-button.active {
+        border-bottom: 3px solid blue;
+        font-weight: bold;
+    }
+
+.form-container {
+    border: 1px solid #ccc;
+    padding: 20px;
+    border-radius: 5px;
+    background: #f9f9f9;
+}
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+    .table th, .table td {
+        border: 1px solid #ccc;
+        padding: 10px;
+        text-align: left;
+    }
+
+input, select {
+    padding: 8px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+button {
+    padding: 5px 10px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.edit-button {
+    background-color: orange;
+    color: white;
+}
+
+.delete-button {
+    background-color: red;
+    color: white;
+}
+
+.add-button {
+    background-color: green;
+    color: white;
+}
+
+

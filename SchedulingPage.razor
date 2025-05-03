@@ -1,0 +1,890 @@
+﻿@page "/schedule"
+@attribute [Authorize(Roles = "User")]
+
+@using Kairos.Shared.Data
+@using Kairos.Shared.Dtos
+@using Kairos.UI.Services
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.FluentUI.AspNetCore.Components
+@using System.Collections.Generic
+
+@inject IHttpClientFactory HttpClientFactory
+@inject HttpClient Http
+@inject SignalRService SignalRService
+@inject IToastService ToastService
+
+
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+<FluentToastProvider />
+
+<div class="schedule-container">
+    <div class="header">
+        <div class="date-left">
+            <FluentButton Style="width: 80px;" IconEnd="@(new Icons.Regular.Size16.Save())" OnClick="OnSaveClick"></FluentButton>
+            <FluentButton Style="width: 130px;" OnClick="GenerateSchedule">Generate</FluentButton>
+
+        </div>
+        @if (ShowNotification)
+        {
+            <div style="position: fixed; top: 20px; right: 20px; background-color: #4CAF50; color: white; padding: 16px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.1); z-index: 9999;">
+                @NotificationMessage
+            </div>
+        }
+
+        <div class="date-center">
+            <h3>@TodayDate</h3>
+            <FluentCombobox TOption="string"
+                            Placeholder="Select Shift"
+                            Autocomplete="ComboboxAutocomplete.List"
+                            @bind-Value="SelectedShiftName"
+                            @onchange="OnShiftChange">
+                @foreach (var shift in Shifts)
+                {
+                    <FluentOption Value="@shift.Name">@shift.Name</FluentOption>
+                }
+            </FluentCombobox>
+        </div>
+        <div class="navigation-right">
+            <FluentButton OnClick="GoToPreviousDay">←</FluentButton>
+            <FluentButton OnClick="GoToToday">Day</FluentButton>
+            <FluentButton OnClick="GoToNextDay">→</FluentButton>
+        </div>
+    </div>
+
+
+    <FluentDragContainer TItem="string" OnDropEnd="OnDropEnd">
+        <div class="content">
+            <div class="calendar" style="grid-template-columns: @GridTemplateColumns;">
+                <div class="time-label">Time</div>
+                @foreach (var airline in FlightStrings)
+                {
+                    <div class="calendar-header-cell">@airline</div>
+                }
+                @foreach (var time in TimeSlots)
+                {
+                    <div class="calendar-row">
+                        <div class="time-label">@time</div>
+                        @foreach (var airline in FlightStrings)
+                        {
+                            var cellId = $"{airline}-{time}";
+
+                            <FluentDropZone TItem="string" Id="@cellId" Draggable="false" Droppable="true"
+                                            OnDrop="MoveEmployee"
+                                            OnDragLeave="@(e => RemoveOnDragLeave(e, cellId))">
+
+
+                                <div class="calendar-cell"
+                                     @ondblclick="() => ExpandCell(cellId)"
+                                     style="@(ExpandedCellId == cellId ? "max-height: 150px; overflow-y: auto;" : "max-height: 50px; overflow: hidden;")">
+
+                                    @foreach (var flight in Flights
+                                   .Where(f => f.FlightNumber == airline && f.ProgrammedTime.Date == CurrentDate)
+                                   .GroupBy(f => new { f.FlightNumber, f.ProgrammedTime })
+                                   .Select(g => g.First()))
+                                    {
+                                        @if (IsTimeSlotMatch(flight.ProgrammedTime, time))
+                                        {
+                                            <div class="flight-header" style="background-color: #ADD8E6; padding: 5px; margin-bottom: 5px; border-radius: 5px;">
+                                                <strong>@flight.AirlineData.Name</strong><br />
+                                                Flight: @flight.FlightNumber<br />
+                                                Arrival: @flight.ProgrammedTime.ToShortTimeString()
+                                            </div>
+                                        }
+                                    }
+
+
+                                    @if (DroppedItems.TryGetValue(cellId, out var items))
+                                    {
+                                        <div class="employee-container">
+                                            @foreach (var item in items)
+                                            {
+                                                var employee = Employees.FirstOrDefault(e => e.Id.ToString() == item);
+                                                if (employee != null)
+                                                {
+                                                    <FluentDropZone TItem="string" Id="@employee.Id.ToString()" Draggable="true" Droppable="false">
+                                                        <div class="employee-item"
+                                                             draggable="true"
+                                                             style="background-color: @(employee.Professions.Any()
+                     ? GetProfessionColor(employee.Professions.First())
+                     : "#ccc"); cursor: grab;">
+                                                            @employee.Name @employee.Surname
+                                                        </div>
+                                                    </FluentDropZone>
+                                                }
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </FluentDropZone>
+
+                        }
+                    </div>
+                }
+
+            </div>
+            <div class="filters">
+                <FluentNavMenu Title="Show available airlines" Width="300">
+                    <FluentNavGroup Title="Airlines" Expanded="true" Icon="@(new Icons.Regular.Size20.Airplane())">
+                        <div class="fluent-nav-group-airlines">
+                            @foreach (var airline in FlightStrings)
+                            {
+                                <div class="airline-item">
+                                    <input type="checkbox" id="@airline" checked />
+                                    <label for="@airline">@airline</label>
+                                </div>
+                            }
+                        </div>
+                    </FluentNavGroup>
+                </FluentNavMenu>
+
+                <FluentNavMenu Title="Available Employees" Width="300">
+                    <FluentNavGroup Title="Professions" Expanded="true" Icon="@(new Icons.Regular.Size20.PeopleTeam())">
+                        @if (Professions.Any())
+                        {
+                            @foreach (var profession in Professions)
+                            {
+                                <FluentNavGroup Title="@profession.Name" Expanded="false" Icon="@(new Icons.Regular.Size20.Briefcase())">
+                                    @foreach (var employee in Employees.Where(e => e.Professions.Any(p => p.Id == profession.Id)))
+                                    {
+                                        <FluentDropZone TItem="string" Id="@employee.Id.ToString()" Draggable="true" Droppable="false">
+                                            <div class="employee-item" style="background-color: @GetProfessionColor(profession)">
+                                                @employee.Name @employee.Surname
+                                            </div>
+                                        </FluentDropZone>
+                                    }
+                                </FluentNavGroup>
+                            }
+                        }
+                        else
+                        {
+                            <div>No professions available.</div>
+                        }
+                    </FluentNavGroup>
+                </FluentNavMenu>
+            </div>
+        </div>
+    </FluentDragContainer>
+</div>
+
+@code {
+
+    private DateTime CurrentDate = DateTime.UtcNow.Date;
+    private List<WorkSchedule> WorkSchedules { get; set; } = new();
+    private string TodayDate => CurrentDate.ToString("dddd, dd MMM yyyy");
+    private Shift? SelectedShift;
+    private List<Shift> Shifts = new();
+    private List<string> FlightStrings { get; set; } = [];
+    private List<Item> Flights { get; set; } = [];
+    private List<string> TimeSlots = new();
+    private List<Profession> Professions = new();
+    public List<Employee> Employees { get; set; } = new();
+
+    private List<FutureShiftHistory> FutureShifts { get; set; } = new();
+    private Dictionary<string, List<string>> DroppedItems { get; set; } = new();
+    private string? _selectedShiftName;
+    private string? SelectedShiftName
+    {
+        get => _selectedShiftName;
+        set
+        {
+            if (_selectedShiftName != value)
+            {
+                _selectedShiftName = value;
+                SelectedShift = Shifts.FirstOrDefault(s => s.Name == _selectedShiftName);
+
+                if (SelectedShift != null)
+                {
+                    UpdateTimeSlots();
+                }
+            }
+        }
+    }
+
+    private string GridTemplateColumns => $"100px repeat({FlightStrings.Count}, 1fr)";
+
+    private void UpdateVisibleAirlines()
+    {
+        FlightStrings = Flights
+            .Where(f => f.ProgrammedTime.Date == CurrentDate)
+            .Select(f => f.FlightNumber)
+            .Distinct()
+            .ToList();
+
+        StateHasChanged();
+    }
+
+
+    private void GoToPreviousDay()
+    {
+        CurrentDate = CurrentDate.AddDays(-1);
+        UpdateVisibleAirlines();
+        if (SelectedShift != null)
+        {
+            FetchEmployeesByShiftAsync(SelectedShift.Id);
+        }
+        StateHasChanged();
+    }
+
+    private void GoToNextDay()
+    {
+        CurrentDate = CurrentDate.AddDays(1);
+        UpdateVisibleAirlines();
+        if (SelectedShift != null)
+        {
+            FetchEmployeesByShiftAsync(SelectedShift.Id);
+        }
+        StateHasChanged();
+    }
+
+    private void GoToToday()
+    {
+        CurrentDate = DateTime.Now.Date;
+        StateHasChanged();
+    }
+
+    private void UpdateTimeSlots()
+    {
+        TimeSlots.Clear();
+        if (SelectedShift is not null)
+        {
+            var currentTime = SelectedShift.StartTime;
+            var endTime = SelectedShift.EndTime;
+
+            if (endTime <= currentTime)
+            {
+                endTime = endTime.Add(TimeSpan.FromDays(1));
+            }
+
+            while (currentTime <= endTime)
+            {
+                TimeSlots.Add(currentTime.ToString(@"hh\:mm"));
+                currentTime = currentTime.Add(TimeSpan.FromHours(1));
+            }
+        }
+    }
+
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (SelectedShift != null)
+        {
+            UpdateTimeSlots();
+        }
+    }
+
+    private string GetProfessionColor(Profession profession)
+    {
+        return profession.Name.Trim().ToLower() switch
+        {
+            "cleaner" => "#76c7c0",
+            "driver" => "#f4a261",
+            "technician" => "#4a90e2",
+            "manager" => "#ffcc00",
+            "engeener" => "#2ECC71",
+            "operator" => "#3498DB",
+            "security officer" => "#E74C3C",
+            "loader" => "#FF5733",
+            "service agent" => "#9B59B6",
+            _ => "#ccc"
+        };
+    }
+
+    private void OnDropEnd(FluentDragEventArgs<string> e)
+    {
+        foreach (var key in DroppedItems.Keys)
+        {
+            if (DroppedItems[key].Remove(e.Source.Id))
+            {
+                break;
+            }
+        }
+
+        if (!DroppedItems.ContainsKey(e.Target.Id))
+        {
+            DroppedItems[e.Target.Id] = new List<string>();
+        }
+
+        if (!DroppedItems[e.Target.Id].Contains(e.Source.Id))
+        {
+            DroppedItems[e.Target.Id].Add(e.Source.Id);
+        }
+
+        StateHasChanged();
+    }
+
+
+    private async Task MoveEmployee(FluentDragEventArgs<string> e)
+    {
+        try
+        {
+            var employeeId = e.Source.Id;
+            var airline = e.Target.Id.Split('-')[0];
+
+            var client = HttpClientFactory.CreateClient(Consts.HttpClientName);
+            var response = await client.GetFromJsonAsync<CertificationCheck>(
+                $"/api/schedule/check-certification?employeeId={employeeId}&airlineName={airline}");
+
+            if (response != null && !response.IsCertified)
+            {
+                return;
+            }
+
+            if (!DroppedItems.ContainsKey(e.Target.Id))
+            {
+                DroppedItems[e.Target.Id] = new List<string>();
+            }
+
+            DroppedItems[e.Target.Id].Add(employeeId);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in MoveEmployee: {ex.Message}");
+        }
+    }
+
+
+    private void MoveEmployeeToZone(FluentDragEventArgs<string> e, string zoneId)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(e.Source.Id) || string.IsNullOrEmpty(zoneId))
+            {
+                throw new Exception("Source or Zone ID is null or empty");
+            }
+
+            var employeeId = e.Source.Id;
+
+            foreach (var key in DroppedItems.Keys)
+            {
+                if (DroppedItems[key].Remove(employeeId))
+                {
+                    break;
+                }
+            }
+
+            if (!DroppedItems.ContainsKey(zoneId))
+            {
+                DroppedItems[zoneId] = new List<string>();
+            }
+
+            if (!DroppedItems[zoneId].Contains(employeeId))
+            {
+                DroppedItems[zoneId].Add(employeeId);
+            }
+
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in MoveEmployeeToZone: {ex.Message}");
+        }
+    }
+
+    private async void RemoveOnDragLeave(FluentDragEventArgs<string> e, string cellId)
+    {
+        if (!DroppedItems.ContainsKey(cellId) || !DroppedItems[cellId].Contains(e.Source.Id))
+        {
+            return;
+        }
+
+        DroppedItems[cellId].Remove(e.Source.Id);
+        StateHasChanged();
+
+        if (long.TryParse(e.Source.Id, out var employeeId))
+        {
+            var client = HttpClientFactory.CreateClient(Consts.HttpClientName);
+            var date = CurrentDate.ToUniversalTime().Date;
+            var startTime = TimeSlots.FirstOrDefault(ts => cellId.Contains(ts));
+
+            var query = $"/api/schedule/delete-work-schedule?employeeId={employeeId}&date={date:yyyy-MM-dd}&startTime={startTime}";
+
+            var response = await client.DeleteAsync(query);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"Failed to delete WorkSchedule for Employee {employeeId}");
+            }
+        }
+    }
+
+
+    private async Task FetchEmployeesByShiftAsync(long shiftId)
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+            var utcDate = DateTime.SpecifyKind(CurrentDate.Date, DateTimeKind.Utc);
+
+            var response = await httpClient.GetFromJsonAsync<List<Employee>>(
+                $"/futureShiftHistories/employees-by-shift?shiftId={shiftId}&date={utcDate:yyyy-MM-ddTHH:mm:ssZ}");
+
+            Employees = response ?? new List<Employee>();
+
+            Console.WriteLine($"Employees fetched for shift {shiftId} on {utcDate}: {Employees.Count}");
+
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error fetching employees: {ex.Message}");
+        }
+    }
+
+
+    private async Task OnShiftChange(ChangeEventArgs e)
+    {
+        var selectedShiftName = e.Value?.ToString();
+        var selectedShift = Shifts.FirstOrDefault(s => s.Name == selectedShiftName);
+
+        if (selectedShift != null)
+        {
+            await FetchEmployeesByShiftAsync(selectedShift.Id);
+        }
+    }
+
+    private bool IsFlightInTimeSlot(Item flight, string time)
+    {
+        if (!TimeSpan.TryParse(time, out var slotTime))
+            return false;
+
+        var flightTime = flight.ProgrammedTime.TimeOfDay;
+
+        return flightTime.Hours == slotTime.Hours && flightTime.Minutes >= slotTime.Minutes && flightTime.Minutes < slotTime.Minutes + 60;
+    }
+    private string? ExpandedCellId;
+
+    private void ExpandCell(string cellId)
+    {
+        if (ExpandedCellId == cellId)
+        {
+            ExpandedCellId = null;
+        }
+        else
+        {
+            ExpandedCellId = cellId;
+        }
+
+        StateHasChanged();
+    }
+
+    private bool IsTimeSlotMatch(DateTime dateTime, string timeSlot)
+    {
+        if (!TimeSpan.TryParse(timeSlot, out var slotTime))
+            return false;
+
+        var flightTime = dateTime.TimeOfDay;
+
+        return flightTime.Hours == slotTime.Hours && flightTime.Minutes >= slotTime.Minutes && flightTime.Minutes < slotTime.Minutes + 60;
+    }
+
+
+
+    private async Task LoadFlightsAsync()
+    {
+        var client = HttpClientFactory.CreateClient(Consts.HttpClientFlightName);
+        var response = await client.GetFromJsonAsync<RootObject>("/api/Flights/GetTimeFixedFlights?maxresultcount=2000&isarrival=true");
+
+        if (response != null)
+        {
+            var armeniaTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Yerevan");
+            Flights = response.Result.Items;
+            FlightStrings = Flights
+                .Where(f => !string.IsNullOrWhiteSpace(f.FlightNumber))
+                .Select(f => $"{f.FlightNumber}")
+                .ToList();
+
+            StateHasChanged();
+        }
+    }
+
+
+    private async Task LoadShifts()
+    {
+        var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+        var response = await httpClient.GetAsync("/shifts");
+        if (response.IsSuccessStatusCode)
+        {
+            Shifts = await response.Content.ReadFromJsonAsync<List<Shift>>();
+        }
+    }
+
+
+    private async Task LoadProfessionsFromDatabase()
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+            var response = await httpClient.GetAsync("/professions");
+            if (response.IsSuccessStatusCode)
+            {
+                Professions = await response.Content.ReadFromJsonAsync<List<Profession>>();
+            }
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Error fetching professions: " + ex.Message);
+        }
+    }
+
+    private async Task LoadEmployeesFromDatabase()
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+            var response = await httpClient.GetAsync("/employees");
+            if (response.IsSuccessStatusCode)
+            {
+                Employees = await response.Content.ReadFromJsonAsync<List<Employee>>();
+                foreach (var employee in Employees)
+                {
+                    var professionResponse = await httpClient.GetAsync($"/employees/{employee.Id}/professions");
+                    if (professionResponse.IsSuccessStatusCode)
+                    {
+                        employee.Professions = await professionResponse.Content.ReadFromJsonAsync<List<Profession>>();
+                    }
+                }
+            }
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Error fetching employees: " + ex.Message);
+        }
+    }
+
+    private async Task ValidateEmployeeAssignments()
+    {
+        foreach (var column in DroppedItems)
+        {
+            var airline = column.Key.Split('-')[0];
+            var timeSlot = column.Key.Split('-')[1];
+
+            foreach (var employeeIdStr in column.Value)
+            {
+                if (long.TryParse(employeeIdStr, out var employeeId))
+                {
+                    var client = HttpClientFactory.CreateClient(Consts.HttpClientName);
+                    var response = await client.GetFromJsonAsync<CertificationCheck>(
+                        $"/api/schedule/check-certification?employeeId={employeeId}&airlineName={airline}");
+
+                    if (response != null && !response.IsCertified)
+                    {
+                        ShowToast(new Notify
+                            {
+                                Message = $"❌ {response.Message} (Employee ID: {employeeId})",
+                                Id = 0,
+                            });
+                    }
+                    else
+                    {
+                        var shiftId = SelectedShift?.Id ?? 0;
+                        var date = CurrentDate.ToUniversalTime().Date;
+                        var startTime = TimeSpan.Parse(timeSlot);
+                        var endTime = startTime.Add(TimeSpan.FromMinutes(30));
+
+                        var query = $"/api/schedule/add-work-schedule?date={date:yyyy-MM-dd}&startTime={startTime}&endTime={endTime}&employeeId={employeeId}&shiftId={shiftId}";
+
+                        var saveResponse = await client.PostAsync(query, null);
+
+                        if (!saveResponse.IsSuccessStatusCode)
+                        {
+                            Console.WriteLine($"Failed to save WorkSchedule for Employee {employeeId}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private async Task AddFlightsToDatabaseAsync()
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient(Consts.HttpClientFlightName);
+            var response = await client.GetFromJsonAsync<RootObject>("/api/Flights/GetTimeFixedFlights?maxresultcount=2000&isarrival=true");
+
+            if (response != null)
+            {
+                var httpClient = HttpClientFactory.CreateClient(Consts.HttpClientName);
+
+                foreach (var item in response.Result.Items)
+                {
+                    var flight = new Flight
+                        {
+                            FlightNumber = item.FlightNumber,
+                            AirlineName = item.AirlineData?.Name ?? "",
+                            ProgrammedTime = item.ProgrammedTime,
+                            FlightStatus = item.FlightStatus,
+                            ArrivalOrDeparture = "Arrival"
+                        };
+
+
+                    await httpClient.PostAsJsonAsync("/api/flights/add-flight", flight);
+                }
+
+                Console.WriteLine("Flights added to DB successfully!");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error adding flights to DB: {ex.Message}");
+        }
+    }
+
+    private async void OnSaveClick()
+    {
+        await ValidateEmployeeAssignments();
+    }
+
+
+    private bool ShowNotification { get; set; } = false;
+    private string NotificationMessage { get; set; } = "";
+
+    private void ShowToast(Notify notify)
+    {
+        ToastService.ShowCommunicationToast(new ToastParameters<CommunicationToastContent>
+            {
+                Intent = ToastIntent.Success,
+                Title = "Certificate mismatch",
+                Content = new CommunicationToastContent
+                {
+                    Subtitle = "Incompatibility warning",
+                    Details = notify.Message,
+                },
+            });
+    }
+
+    // private async Task LoadWorkSchedulesAsync()
+    // {
+    //     try
+    //     {
+    //         var client = HttpClientFactory.CreateClient(Consts.HttpClientName);
+    //         var response = await client.GetFromJsonAsync<List<WorkScheduleDto>>("/api/schedule/get-work-schedules");
+
+    //         if (response != null)
+    //         {
+    //             DroppedItems.Clear();
+
+    //             foreach (var schedule in response.Where(s => s.Date.Date == CurrentDate.Date && s.ShiftId == SelectedShift?.Id))
+    //             {
+    //                 var flight = Flights.FirstOrDefault(f =>
+    //                     f.ProgrammedTime.Date == schedule.Date.Date &&
+    //                     f.ProgrammedTime.TimeOfDay == schedule.StartTime);
+
+    //                 if (flight != null)
+    //                 {
+    //                     var timeSlot = schedule.StartTime.ToString(@"hh\:mm");
+    //                     var airline = flight.FlightNumber;
+    //                     var cellId = $"{airline}-{timeSlot}";
+
+    //                     if (!DroppedItems.ContainsKey(cellId))
+    //                         DroppedItems[cellId] = new List<string>();
+
+    //                     var empIdStr = schedule.EmployeeId.ToString();
+
+    //                     if (!DroppedItems[cellId].Contains(empIdStr))
+    //                         DroppedItems[cellId].Add(empIdStr);
+    //                 }
+    //             }
+    //         }
+
+
+    //     }
+    //     catch (Exception ex)
+    //     {
+    //         Console.WriteLine($"Error loading schedules: {ex.Message}");
+    //     }
+
+    // }
+
+    private async Task LoadWorkSchedulesAsync()
+  
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient(Consts.HttpClientName);
+            var response = await client.GetFromJsonAsync<List<WorkScheduleDto>>("/api/schedule/get-work-schedules");
+
+            if (response != null)
+            {
+                DroppedItems.Clear();
+
+                foreach (var schedule in response.Where(s => s.Date.Date == CurrentDate.Date || s.ShiftId == SelectedShift?.Id))
+                {
+                    var flight = Flights.FirstOrDefault(f =>
+                        f.ProgrammedTime.Date == schedule.Date.Date &&
+                        Math.Abs((f.ProgrammedTime.TimeOfDay - schedule.StartTime).TotalMinutes) < 1);
+
+                    if (flight != null)
+                    {
+                        var timeSlot = schedule.StartTime.ToString(@"hh\:mm");
+                        var airline = flight.FlightNumber;
+                        var cellId = $"{airline}-{timeSlot}";
+
+                        if (!DroppedItems.ContainsKey(cellId))
+                            DroppedItems[cellId] = new List<string>();
+
+                        var empIdStr = schedule.EmployeeId.ToString();
+
+                        if (!DroppedItems[cellId].Contains(empIdStr))
+                            DroppedItems[cellId].Add(empIdStr);
+                    }
+                }
+
+                StateHasChanged(); 
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading schedules: {ex.Message}");
+        }
+    }
+
+    private async Task LoadFlightsFromDatabaseAsync()
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient(Consts.HttpClientName);
+            var response = await client.GetFromJsonAsync<List<Flight>>("/api/flights/get-flights");
+
+            if (response != null)
+            {
+                Flights = response
+                    .Where(f => !string.IsNullOrWhiteSpace(f.FlightNumber))
+                    .Select(f => new Item
+                        {
+                            FlightNumber = f.FlightNumber,
+                            ProgrammedTime = f.ProgrammedTime,
+                            FlightStatus = f.FlightStatus,
+                            AirlineData = new AirlineData
+                            {
+                                Name = f.AirlineName
+                            }
+                        })
+                    .ToList();
+
+                FlightStrings = Flights
+                    .Select(f => f.FlightNumber)
+                    .Distinct()
+                    .ToList();
+
+                Console.WriteLine($"Flights fetched from DB: {Flights.Count}");
+            }
+
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading flights from DB: {ex.Message}");
+        }
+    }
+
+   
+
+    private async Task GenerateSchedule()
+    {
+        var client = HttpClientFactory.CreateClient(Consts.HttpClientName);
+        var utcDate = DateTime.SpecifyKind(CurrentDate.Date, DateTimeKind.Utc);
+
+        if (SelectedShift == null || string.IsNullOrWhiteSpace(SelectedShiftName))
+        {
+            ShowToast(new Notify
+                {
+                    Message = "⚠️ Please select a shift.",
+                    Id = 0
+                });
+            return;
+        }
+
+        var shiftEmployees = await client.GetFromJsonAsync<List<Employee>>(
+            $"/futureShiftHistories/employees-by-shift?shiftId={SelectedShift.Id}&date={utcDate:yyyy-MM-ddTHH:mm:ssZ}");
+
+        if (shiftEmployees == null || !shiftEmployees.Any())
+        {
+            ShowToast(new Notify
+                {
+                    Message = "⚠️ There are no employees available for this shift.",
+                    Id = 0
+                });
+            return;
+        }
+
+       // var response = await client.PostAsync($"/api/schedule/generate?date={CurrentDate:yyyy-MM-dd}", null);
+        var response = await client.PostAsync($"/api/schedule/generate?date={CurrentDate:yyyy-MM-dd}&shiftId={SelectedShift.Id}", null);
+
+
+        if (response.IsSuccessStatusCode)
+        {
+            Console.WriteLine("✅ Schedule generated in backend.");
+
+            await LoadWorkSchedulesAsync();
+
+            StateHasChanged();
+
+            ShowToast(new Notify
+                {
+                    Message = "✅ Schedule generated and displayed!",
+                    Id = 0
+                });
+        }
+        else
+        {
+            Console.WriteLine("❌ Schedule generation failed.");
+            ShowToast(new Notify
+                {
+                    Message = "❌ Schedule generation failed.",
+                    Id = 0
+                });
+        }
+    }
+
+
+    private void UpdateDroppedItems()
+    {
+        DroppedItems.Clear();
+        foreach (var schedule in WorkSchedules)
+        {
+            var airline = Flights.FirstOrDefault(f => f.ProgrammedTime.Date == schedule.Date.Date)?.FlightNumber;
+            if (!string.IsNullOrEmpty(airline))
+            {
+                var timeSlot = schedule.StartTime.ToString(@"hh\:mm");
+                var cellId = $"{airline}-{timeSlot}";
+                if (!DroppedItems.ContainsKey(cellId))
+                {
+                    DroppedItems[cellId] = new List<string>();
+                }
+                var employeeId = schedule.Id.ToString();
+                if (!DroppedItems[cellId].Contains(employeeId))
+                {
+                    DroppedItems[cellId].Add(employeeId);
+                }
+            }
+        }
+    }
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SignalRService.StartConnectionAsync();
+
+        SignalRService.ToastCallback = ShowToast;
+        await LoadShifts();
+        if (Shifts.Any())
+        {
+            SelectedShift = Shifts.First();
+            SelectedShiftName = SelectedShift.Name;
+            UpdateTimeSlots();
+        }
+        await LoadProfessionsFromDatabase();
+        await LoadEmployeesFromDatabase();
+        await AddFlightsToDatabaseAsync();
+        //await GenerateSchedule();
+        await LoadFlightsFromDatabaseAsync();
+        await LoadWorkSchedulesAsync();
+
+    }
+
+}
